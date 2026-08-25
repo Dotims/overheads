@@ -77,6 +77,11 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
 
   'collect:olx': (args) => withDatabase((sql) => collectOlx(sql, count(args[0]) ?? 2)),
 
+  // The backfill form. OLX stops paging at a thousand results per search, so reaching the
+  // rest means asking band by band; see RENT_BANDS in commands/collect-olx.ts.
+  'collect:olx:bands': (args) =>
+    withDatabase((sql) => collectOlx(sql, count(args[0]) ?? 20, true)),
+
   'collect:gratka': (args) => withDatabase((sql) => collectGratka(sql, count(args[0]) ?? 2)),
 
   'collect:otodom': (args) => {
