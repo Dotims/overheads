@@ -3,7 +3,7 @@ name: Collect
 on:
   schedule:
     # Every 15 minutes. GitHub runs scheduled jobs late under load; it is a floor, not a promise.
-    - cron: '*/15 * * * *'
+    - cron: '*/30 * * * *'
   # So a round can be started by hand from the Actions tab.
   workflow_dispatch:
 

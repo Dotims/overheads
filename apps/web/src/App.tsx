@@ -40,7 +40,7 @@ import { useView, VIEW_CARD, VIEW_LAYOUT, VIEWS } from './views.ts';
  * answer fourteen times over. It matters more now the list is thousands of rows rather
  * than the few hundred it was written for. The sync button covers wanting it sooner.
  */
-const REFRESH_MS = 300_000;
+const REFRESH_MS = 900_000;
 
 /** A background poll may fail quietly once; two in a row means the API is gone. */
 const FAILURES_BEFORE_DISCONNECTED = 2;
@@ -145,6 +145,12 @@ export function App() {
     // A swallowed poll failure used to leave the header claiming freshness forever.
     let consecutiveFailures = 0;
     const timer = setInterval(() => {
+      // A tab left open overnight is the one way this page can still run the database's
+      // transfer allowance down: every poll is a full read of the listing set, and 96 of
+      // them a day against a backfilled database comes to more than a month's worth.
+      // Nobody is reading a hidden tab, so nothing is lost by waiting for it to come back.
+      if (document.visibilityState === 'hidden') return;
+
       void load()
         .then(() => {
           consecutiveFailures = 0;
@@ -155,9 +161,17 @@ export function App() {
         });
     }, REFRESH_MS);
 
+    // Coming back to the tab is exactly when a stale list is most obvious, so catch up at
+    // once rather than making the visitor wait out the rest of the interval.
+    const onVisible = (): void => {
+      if (document.visibilityState === 'visible') void load().catch(() => undefined);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
     return () => {
       controller.abort();
       clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
     };
   }, [load]);
 
