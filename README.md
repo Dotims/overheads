@@ -49,6 +49,18 @@ is roughly what a Kraków flat costs to run, unless the description says the pri
 everything or that there is no fee. Every verdict carries a `cost_certainty` saying
 whether its total was read or assumed, and a list of reasons in plain words.
 
+Prose is where the patterns run out. Two descriptions in three that mention utilities
+state the amount in a form no regular expression reaches: `prad oraz gaz wedlug zuzycia
+(ok 250zl miesiecznie)`, `oplata za wode i smieci - przy 2 osobach 200zl`. `read:costs`
+puts those through a small language model running locally and stores what it read in
+`cost_readings`, which the rules then consult for whatever the portal left blank. The
+model only extracts; every judgement stays in `domain/classify.ts` where it can be
+tested without a model running. It is optional: with no model configured, listings are
+priced by the rules alone exactly as before.
+
+Costs are also reported per person, the total split by room count, because that is the
+figure two flats of different sizes can actually be compared on.
+
 ## How it works
 
 All three portals serve structured JSON, so there is no HTML parsing and no headless
@@ -88,7 +100,7 @@ dependencies.
 
 ```bash
 pnpm install
-cp .env.example .env                            # then put your Neon connection string in it
+cp .env.example .env                            # then put your Postgres connection string in it
 pnpm --filter @overheads/collector migrate      # creates the schema
 pnpm --filter @overheads/collector collect:olx     # fetches and stores OLX listings
 pnpm --filter @overheads/collector collect:otodom # same for Otodom
@@ -96,6 +108,32 @@ pnpm --filter @overheads/collector collect:gratka # same for Gratka
 pnpm --filter @overheads/collector classify     # judges what is stored, no network
 pnpm --filter @overheads/collector status       # prints what is in the database
 ```
+
+Reading costs out of descriptions needs a model. There are two ways to provide one and
+the project does not care which:
+
+A **hosted** one runs inside the collection round, so a listing is priced before it is
+announced rather than corrected an hour later. Any OpenAI-compatible endpoint will do;
+[Groq](https://console.groq.com) issues free keys without a card. Set `LLM_API_KEY`,
+`LLM_BASE_URL` and `LLM_MODEL`, and the round reads up to fifteen new listings a time,
+twelve seconds apart, because free tiers cap tokens per minute long before requests.
+
+A **local** one is for backfills, where a hosted free tier would run out on the first
+thousand. Install [Ollama](https://ollama.com), set `OLLAMA_MODEL`, and run it by hand:
+
+```bash
+ollama serve &
+ollama pull qwen3:4b
+pnpm --filter @overheads/collector read:costs 50     # roughly two minutes
+pnpm --filter @overheads/collector read:costs 2000   # or the whole backlog
+```
+
+Two to four seconds a listing on a 6 GB card, and it reclassifies when it is done. The
+queue is ordered by whether the reading could still change the verdict, so listings within
+reach of the budget are read first and the rest are behind them rather than dropped.
+
+Nothing else depends on any of this. With no model configured at all, listings are priced
+by the rules alone and every other command works exactly as it did.
 
 The dashboard needs two terminals: the API reads the database, the dev server serves the
 page and proxies `/api` to it.

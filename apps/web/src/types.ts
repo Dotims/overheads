@@ -20,6 +20,8 @@ export interface Offer {
   pricePln: number | null;
   rentPln: number | null;
   totalCostPln: number | null;
+  /** The total split across the rooms, which is what one person actually pays. */
+  costPerPersonPln: number | null;
   tier: Tier;
   costCertainty: CostCertainty;
   reasons: string[];

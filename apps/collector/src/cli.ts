@@ -6,6 +6,7 @@ import { collectOlx } from './commands/collect-olx.ts';
 import { collectOtodom, type CollectOtodomOptions } from './commands/collect-otodom.ts';
 import { dedupeOffers } from './commands/dedupe.ts';
 import { notifyNewOffers, seedNotifications } from './commands/notify.ts';
+import { readCosts } from './commands/read-costs.ts';
 import { config } from './config.ts';
 import { openDatabase, type Sql } from './db/client.ts';
 import type { NotifyFilters } from './domain/notify-filters.ts';
@@ -79,8 +80,7 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
 
   // The backfill form. OLX stops paging at a thousand results per search, so reaching the
   // rest means asking band by band; see RENT_BANDS in commands/collect-olx.ts.
-  'collect:olx:bands': (args) =>
-    withDatabase((sql) => collectOlx(sql, count(args[0]) ?? 20, true)),
+  'collect:olx:bands': (args) => withDatabase((sql) => collectOlx(sql, count(args[0]) ?? 20, true)),
 
   'collect:gratka': (args) => withDatabase((sql) => collectGratka(sql, count(args[0]) ?? 2)),
 
@@ -97,6 +97,14 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   },
 
   classify: () => withDatabase((sql) => classifyOffers(sql)),
+
+  // Needs a model running, so it is never part of `collect`. See commands/read-costs.ts.
+  'read:costs': (args) =>
+    withDatabase(async (sql) => {
+      await readCosts(sql, count(args[0]));
+      // The verdicts were computed without these readings, so they are stale by definition.
+      await classifyOffers(sql);
+    }),
 
   dedupe: () =>
     withDatabase(async (sql) => {

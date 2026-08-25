@@ -235,7 +235,10 @@ export async function listDetailedSourceIds(
   return new Set(rows.map((row) => readString(row, 'source_id')));
 }
 
-/** Listings with no verdict or an outdated one. Bumping RULES_VERSION reclassifies all. */
+/**
+ * Listings with no verdict, or one that is out of date. Bumping RULES_VERSION reclassifies
+ * everything; a reading taken since the verdict was reached reclassifies just that one.
+ */
 export async function listOffersToClassify(
   sql: Queryable,
   rulesVersion: number,
@@ -247,7 +250,13 @@ export async function listOffersToClassify(
            o.is_private_owner, o.advertiser, o.status, o.created_at_source, o.pushed_up_at
     from offers o
     left join classifications c on c.offer_id = o.id
-    where c.offer_id is null or c.rules_version <> ${rulesVersion}
+    left join cost_readings r on r.offer_id = o.id
+    where c.offer_id is null
+       or c.rules_version <> ${rulesVersion}
+       -- A reading taken after the verdict was reached is a verdict reached without it.
+       -- Without this line, read:costs files readings that nothing ever consults: the
+       -- rules version has not moved, so the listing looks judged and up to date.
+       or (r.offer_id is not null and c.classified_at < r.read_at)
     order by o.id
   `;
 

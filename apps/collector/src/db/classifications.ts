@@ -21,16 +21,19 @@ export async function saveClassification(
 ): Promise<void> {
   await sql`
     insert into classifications (
-      offer_id, tier, total_cost_pln, cost_certainty, reasons, rules_version, classified_at
+      offer_id, tier, total_cost_pln, cost_per_person_pln, cost_certainty, reasons,
+      rules_version, classified_at
     ) values (
       ${offerId}, ${classification.tier}, ${classification.totalCostPln},
+      ${classification.costPerPersonPln},
       -- sql.json, so this lands as an array rather than a JSON string holding one.
       ${classification.costCertainty}, ${sql.json(classification.reasons)},
       ${rulesVersion}, now()
     )
     on conflict (offer_id) do update set
-      tier           = excluded.tier,
-      total_cost_pln = excluded.total_cost_pln,
+      tier                = excluded.tier,
+      total_cost_pln      = excluded.total_cost_pln,
+      cost_per_person_pln = excluded.cost_per_person_pln,
       cost_certainty = excluded.cost_certainty,
       reasons        = excluded.reasons,
       rules_version  = excluded.rules_version,
@@ -51,6 +54,8 @@ export interface ClassifiedOffer {
   pricePln: number | null;
   rentPln: number | null;
   totalCostPln: number | null;
+  /** The total split across the people expected to share it, so two flats compare fairly. */
+  costPerPersonPln: number | null;
   tier: Tier;
   costCertainty: CostCertainty;
   reasons: string[];
@@ -97,6 +102,7 @@ function toClassifiedOffer(row: DbRow): ClassifiedOffer {
     pricePln: readNullableNumber(row, 'price_pln'),
     rentPln: readNullableNumber(row, 'rent_pln'),
     totalCostPln: readNullableNumber(row, 'total_cost_pln'),
+    costPerPersonPln: readNullableNumber(row, 'cost_per_person_pln'),
     tier: toTier(readString(row, 'tier')),
     costCertainty: toCertainty(readString(row, 'cost_certainty')),
     reasons: readStringArray(row, 'reasons'),
@@ -133,7 +139,34 @@ function readAlsoOn(row: DbRow): { source: string; url: string }[] {
   });
 }
 
-/** Everything the dashboard shows. A few hundred rows, so it is sent once and filtered there. */
+/**
+ * How far above the owner's budget a listing may sit and still be sent to the page.
+ *
+ * A ceiling rather than the tiers, because the tiers are the verdict and this is only
+ * about weight: 3500 is a third above the 2600 the flat has to come in under, so every
+ * listing the dashboard's own filters could be widened to want is here, and the four
+ * fifths of the market that are plainly out of reach are not. It halves a payload that
+ * grew to 3.6MB when the archive was backfilled on 2026-08-25, and the map stops
+ * plotting four thousand pins nobody looks at.
+ *
+ * A listing with no total is kept: that means no rent was stated, not that it is dear.
+ */
+const SENT_CEILING_PLN = 3_500;
+
+/** How many the ceiling left behind, so the page can say so rather than quietly shrink. */
+export async function countOmittedOffers(sql: Queryable): Promise<number> {
+  const [row] = await sql<DbRow[]>`
+    select count(*)::int as omitted
+    from classifications c
+    join offers o on o.id = c.offer_id
+    where o.status = 'active' and o.duplicate_of is null
+      and c.total_cost_pln > ${SENT_CEILING_PLN}
+  `;
+
+  return row === undefined ? 0 : readNumber(row, 'omitted');
+}
+
+/** Everything the dashboard shows, up to the ceiling above. Sent once and filtered there. */
 export async function listClassifiedOffers(sql: Queryable): Promise<ClassifiedOffer[]> {
   const rows = await sql<DbRow[]>`
     select o.id, o.source, o.url, o.title, o.district, o.area_m2, o.rooms, o.floor,
@@ -145,7 +178,7 @@ export async function listClassifiedOffers(sql: Queryable): Promise<ClassifiedOf
            -- scalar, which would take the whole endpoint down over a thumbnail.
            case when jsonb_typeof(o.photos) = 'array' then jsonb_array_length(o.photos)
                 else 0 end as photo_count,
-           c.tier, c.total_cost_pln, c.cost_certainty, c.reasons,
+           c.tier, c.total_cost_pln, c.cost_per_person_pln, c.cost_certainty, c.reasons,
            coalesce(dupes.also_on, '[]'::jsonb) as also_on
     from classifications c
     join offers o on o.id = c.offer_id
@@ -157,6 +190,7 @@ export async function listClassifiedOffers(sql: Queryable): Promise<ClassifiedOf
     ) dupes on true
     -- A listing marked as a repeat of another is reachable through that one's alsoOn.
     where o.status = 'active' and o.duplicate_of is null
+      and (c.total_cost_pln is null or c.total_cost_pln <= ${SENT_CEILING_PLN})
     -- Tier first: on price alone, a cheap unknown outranks a pricier listing that fits.
     order by case c.tier when 'top' then 0 when 'worth' then 1 else 2 end, c.total_cost_pln
   `;

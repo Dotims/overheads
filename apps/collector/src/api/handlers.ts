@@ -1,5 +1,9 @@
 import type { Sql } from '../db/client.ts';
-import { listClassifiedOffers, type ClassifiedOffer } from '../db/classifications.ts';
+import {
+  countOmittedOffers,
+  listClassifiedOffers,
+  type ClassifiedOffer,
+} from '../db/classifications.ts';
 import { upsertOffer } from '../db/offers.ts';
 import { readOfferDetail, type OfferDetail } from '../db/offer-detail.ts';
 import { listSourceStatus, type SourceStatus } from '../db/runs.ts';
@@ -53,9 +57,16 @@ export interface SyncResult {
  */
 export async function readOffers(
   sql: Sql,
-): Promise<{ offers: ClassifiedOffer[]; sources: SourceStatus[] }> {
-  const [offers, sources] = await Promise.all([listClassifiedOffers(sql), listSourceStatus(sql)]);
-  return { offers, sources };
+): Promise<{ offers: ClassifiedOffer[]; sources: SourceStatus[]; omitted: number }> {
+  // `omitted` is a count, not rows: it costs nothing to send and stops the ceiling in
+  // listClassifiedOffers being a silent edit of what the page is looking at.
+  const [offers, sources, omitted] = await Promise.all([
+    listClassifiedOffers(sql),
+    listSourceStatus(sql),
+    countOmittedOffers(sql),
+  ]);
+
+  return { offers, sources, omitted };
 }
 
 /** One listing in full: description and photos, too heavy for the list payload. */

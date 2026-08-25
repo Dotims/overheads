@@ -22,6 +22,7 @@ function offer(overrides: Partial<Offer> = {}): Offer {
     pricePln: 2000,
     rentPln: 300,
     totalCostPln: 2300,
+    costPerPersonPln: 1150,
     tier: 'top',
     costCertainty: 'exact',
     reasons: [],

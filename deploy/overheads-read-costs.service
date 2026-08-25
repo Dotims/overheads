@@ -1,0 +1,17 @@
+[Unit]
+Description=Overheads: read costs out of listing descriptions with the local model
+After=overheads-model.service
+Wants=overheads-model.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Desktop/projects/overheads
+EnvironmentFile=%h/Desktop/projects/overheads/.env
+# node directly, not pnpm: a unit does not inherit the shell PATH.
+ExecStart=/usr/bin/node apps/collector/src/cli.ts read:costs
+# Four seconds a listing, and a first run after a backfill has thousands to get through.
+# It stops when the queue is empty, so a long run happens once and the rest are short.
+TimeoutStartSec=6h
+
+[Install]
+WantedBy=default.target

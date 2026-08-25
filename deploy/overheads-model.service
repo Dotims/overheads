@@ -1,0 +1,20 @@
+[Unit]
+Description=Overheads: the local language model server that read:costs talks to
+After=network-online.target
+
+[Service]
+Type=exec
+# Unpacked into the home directory rather than installed system wide: this is one user's
+# tool on one machine, and it has no business needing root to exist.
+ExecStart=%h/.local/ollama/bin/ollama serve
+# Loopback only. The model has no authentication and nothing outside this machine has any
+# business asking it questions.
+Environment=OLLAMA_HOST=127.0.0.1:11434
+# Long enough that the model is still resident between one listing and the next, short
+# enough that an idle afternoon gives the graphics card back.
+Environment=OLLAMA_KEEP_ALIVE=10m
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

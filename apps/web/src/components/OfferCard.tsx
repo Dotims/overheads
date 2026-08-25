@@ -108,6 +108,16 @@ export function OfferCard({
             <div className="tag mt-1.5 normal-case" title={certainty.hint}>
               {certainty.label}
             </div>
+            {/* Only where sharing changes the figure. On a one-room flat it would just be
+                the number above again, printed twice. */}
+            {offer.costPerPersonPln !== null && offer.costPerPersonPln !== offer.totalCostPln && (
+              <div
+                className="num mt-1 text-sm text-ink-dim"
+                title={`Całość podzielona na ${String(offer.rooms ?? 1)} os.`}
+              >
+                {pln(offer.costPerPersonPln)} / os.
+              </div>
+            )}
           </div>
         </div>
 

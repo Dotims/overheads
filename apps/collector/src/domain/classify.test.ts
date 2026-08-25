@@ -125,3 +125,18 @@ test('every verdict explains itself', () => {
     assert.ok(classify(sample).reasons.length > 0);
   }
 });
+
+test('a parking space advertised as a flat is not judged as one', () => {
+  const result = classify(
+    offer({ title: 'platforma garażowa na poziomie nr -2', areaM2: 12, pricePln: 350 }),
+  );
+  assert.equal(result.tier, 'other');
+  assert.equal(result.totalCostPln, null);
+});
+
+test('a flat that comes with a garage is still a flat', () => {
+  const result = classify(
+    offer({ title: 'Jasna kawalerka | Garaż + komórka lokatorska', areaM2: 28 }),
+  );
+  assert.notEqual(result.totalCostPln, null);
+});

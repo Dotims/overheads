@@ -9,7 +9,7 @@ const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 function databaseUrl(): string {
   const url = process.env.DATABASE_URL;
   if (url === undefined || url === '') {
-    throw new Error('DATABASE_URL is not set. Put the Neon connection string in .env.');
+    throw new Error('DATABASE_URL is not set. Put the Postgres connection string in .env.');
   }
   return url;
 }

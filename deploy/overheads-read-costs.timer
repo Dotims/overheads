@@ -1,0 +1,14 @@
+[Unit]
+Description=Overheads: read new descriptions with the local model, hourly
+
+[Timer]
+# Hourly, not every fifteen minutes like the collector. The reading is not time critical:
+# a listing without one is priced by the rules alone until this catches up, and the
+# machine this runs on is asleep half the time anyway.
+OnStartupSec=5min
+OnUnitActiveSec=1h
+# Catch up after the machine was off, rather than skipping the backlog it slept through.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -127,6 +127,7 @@ export function OfferDetail({
         <dl className="grid grid-cols-2 gap-x-4 gap-y-3 p-4">
           {[
             ['razem', pln(offer.totalCostPln)],
+            ['na osobę', pln(offer.costPerPersonPln)],
             ['skąd kwota', CERTAINTY[offer.costCertainty].label],
             ['najem', pln(offer.pricePln)],
             ['czynsz', offer.rentPln === null ? 'niepodany' : pln(offer.rentPln)],

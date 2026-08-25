@@ -36,9 +36,10 @@ import { useView, VIEW_CARD, VIEW_LAYOUT, VIEWS } from './views.ts';
 */
 
 /**
- * Collection runs every fifteen minutes, so polling every minute asked for the same
- * answer fourteen times over. It matters more now the list is thousands of rows rather
- * than the few hundred it was written for. The sync button covers wanting it sooner.
+ * Matched to how often a round runs, which is now every half hour. Polling faster than
+ * the collector collects buys nothing and costs a full read of the listing set each time:
+ * a tab left open on the old five-minute poll is what exhausted the database's monthly
+ * transfer allowance on 2026-08-23. The sync button covers wanting it sooner.
  */
 const REFRESH_MS = 900_000;
 
@@ -85,6 +86,8 @@ function OfferSkeleton({ layout }: { layout: string }) {
 export function App() {
   const [collected, setCollected] = useState<Offer[]>([]);
   const [sources, setSources] = useState<SourceStatus[]>([]);
+  /** Listings the API left out for being far above budget. Shown, never hidden. */
+  const [omitted, setOmitted] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [disconnected, setDisconnected] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -121,13 +124,20 @@ export function App() {
   const { marks, setMark } = useMarks();
   const offers = useMemo(() => withMarks(collected, marks), [collected, marks]);
 
-  const load = useCallback(async (signal?: AbortSignal) => {
-    const response = await fetch('/api/offers', signal ? { signal } : {});
+  /** `fresh` skips the CDN copy, for when a stale answer would read as a failed sync. */
+  const load = useCallback(async (signal?: AbortSignal, fresh = false) => {
+    const url = fresh ? '/api/offers?fresh=1' : '/api/offers';
+    const response = await fetch(url, signal ? { signal } : {});
     if (!response.ok) throw new Error(`API odpowiedziało ${response.status}`);
 
-    const body = (await response.json()) as { offers: Offer[]; sources?: SourceStatus[] };
+    const body = (await response.json()) as {
+      offers: Offer[];
+      sources?: SourceStatus[];
+      omitted?: number;
+    };
     setCollected(body.offers);
     setSources(body.sources ?? []);
+    setOmitted(body.omitted ?? 0);
     setError(null);
     setDisconnected(false);
   }, []);
@@ -184,7 +194,7 @@ export function App() {
       const body = (await response.json()) as { added?: number; error?: string };
       if (!response.ok) throw new Error(body.error ?? `API odpowiedziało ${response.status}`);
 
-      await load();
+      await load(undefined, true);
       setSyncNote({
         kind: 'ok',
         text: body.added === 0 ? 'bez nowych ofert' : `nowe oferty: ${body.added}`,
@@ -360,7 +370,7 @@ export function App() {
             <span className="tag animate-drift">wczytuję oferty</span>
           </div>
         ) : (
-          <StatusStrip total={offers.length} sources={sources} />
+          <StatusStrip total={offers.length} omitted={omitted} sources={sources} />
         )}
 
         <div className="mt-4 pb-4">

@@ -39,7 +39,15 @@ function Feed({ status, name }: { status: SourceStatus | undefined; name: string
  * a diagram of the stages between the two used to fold out from here, and it explained a
  * system the owner had stopped needing explained.
  */
-export function StatusStrip({ total, sources }: { total: number; sources: SourceStatus[] }) {
+export function StatusStrip({
+  total,
+  omitted,
+  sources,
+}: {
+  total: number;
+  omitted: number;
+  sources: SourceStatus[];
+}) {
   const byName = (name: string) => sources.find((status) => status.source === name);
 
   return (
@@ -56,6 +64,17 @@ export function StatusStrip({ total, sources }: { total: number; sources: Source
         <span className="num text-sm text-ink">{total}</span>
         <span className="tag">ofert w bazie</span>
       </span>
+
+      {/* The page is not showing everything collected, so it says so. Filtering down to
+          nothing looks the same as a broken collector otherwise. */}
+      {omitted > 0 && (
+        <span
+          className="tag normal-case"
+          title="Zebrane, ale całość powyżej 3500 zł, więc nie są wysyłane na stronę."
+        >
+          + {omitted} poza zasięgiem budżetu
+        </span>
+      )}
     </div>
   );
 }
