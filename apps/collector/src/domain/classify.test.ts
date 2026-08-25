@@ -79,13 +79,14 @@ test('stated utilities are added on top of the fee', () => {
   assert.equal(result.tier, 'worth');
 });
 
-test('utilities named right next to the building fee are left out', () => {
-  // A known limitation rather than an oversight. The reader refuses any figure with the
-  // word "czynsz" within forty characters, because the portal already reports the fee
-  // and counting it twice inflates every total. When both sit in one short sentence the
-  // utilities are lost with it, which understates the cost instead of overstating it.
+test('utilities listed after the building fee are counted once, not lost', () => {
+  // This used to come out at 2300 with the utilities dropped. The reader refused any
+  // figure with the word "czynsz" nearby, so a price list naming both in one sentence
+  // lost the second half of it. The fee is still not double counted: 300 comes from the
+  // portal field, and the 300 in the text is not added to it.
   const result = classify(offer({ description: 'czynsz 300 zł, media 400 zł' }));
-  assert.equal(result.totalCostPln, 2300);
+  assert.equal(result.totalCostPln, 2700);
+  assert.equal(result.costCertainty, 'exact');
 });
 
 test('an estimated total can still reach the priority tier', () => {

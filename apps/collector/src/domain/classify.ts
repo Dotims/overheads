@@ -7,7 +7,9 @@ export type Tier = 'top' | 'worth' | 'other';
 export type CostCertainty = 'exact' | 'all_in' | 'estimated' | 'uncertain';
 
 /** Bump on any rule change below; stored with every verdict so old ones get recomputed. */
-export const RULES_VERSION = 4;
+// v5: cost.ts stopped reading a building fee as a zero fee, and stopped letting a fee word
+// in the previous sentence veto utilities that were stated plainly.
+export const RULES_VERSION = 5;
 
 /** Advertised rent alone. */
 const WORTH_MAX_RENT_PLN = 2200;

@@ -66,10 +66,33 @@ test('silence about utilities is reported as silence, not as zero', () => {
   assert.equal(reading.mentionsUtilities, false);
 });
 
+test('reads utilities stated after the building fee, in a sentence of their own', () => {
+  // The veto used to look 40 characters back and step straight over the full stop, so the
+  // word "czynsz" one sentence earlier disqualified a figure it had nothing to do with.
+  assert.equal(readDescriptionCosts('Czynsz: 800 PLN. Media: 100 PLN.').utilitiesPln, 100);
+});
+
+test('reads utilities listed as the next item after the building fee', () => {
+  const reading = readDescriptionCosts('czynsz administracyjny 800 zł, media 250 zł wg zużycia');
+  assert.equal(reading.utilitiesPln, 250);
+});
+
+test('still refuses a figure the same clause calls a building fee', () => {
+  assert.equal(readDescriptionCosts('opłaty administracyjne 680 zł').utilitiesPln, null);
+});
+
+test('still refuses a figure the sentence attaches to a garage', () => {
+  assert.equal(readDescriptionCosts('do tego dochodzi garaż, opłata 400 zł').utilitiesPln, null);
+});
+
 test('recognises a description that rules out a building fee', () => {
   assert.equal(readDescriptionCosts('bez czynszu administracyjnego').noFee, true);
   assert.equal(readDescriptionCosts('brak czynszu').noFee, true);
   assert.equal(readDescriptionCosts('czynsz administracyjny 500 zł').noFee, false);
+  assert.equal(readDescriptionCosts('czynsz 0 zł').noFee, true);
+  // The zero inside the amount, not a zero fee. This read 38 listings as fee-free.
+  assert.equal(readDescriptionCosts('Czynsz: 800 PLN').noFee, false);
+  assert.equal(readDescriptionCosts('czynsz administracyjny 1000 zł').noFee, false);
 });
 
 test('a missing description reads as saying nothing rather than throwing', () => {
