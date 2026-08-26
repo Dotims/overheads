@@ -40,6 +40,15 @@ jobs:
       - run: pnpm collect
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # Reading the total cost out of a description needs a model. Without these three
+          # the round says so and carries on with the rules alone, which is how every cloud
+          # round ran until now. The key is a secret; the endpoint and the model name are
+          # variables, so a switch of provider is one change in the Actions tab. The pause
+          # between requests defaults to twelve seconds in the collector, which is what the
+          # free tier's token rate allows, so it is not set here.
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ vars.LLM_BASE_URL }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
           # Both portals. OLX used to refuse this address and the round asked for Otodom
           # alone; measured again on 2026-08-16 it answers 200 here, four times over two
           # minutes, to the same honest User-Agent we have always sent. What it still
