@@ -1,5 +1,5 @@
-import { divIcon, type Marker as LeafletMarker } from 'leaflet';
-import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { divIcon, type LatLngBounds, type Marker as LeafletMarker, type PopupEvent } from 'leaflet';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { MapContainer, Marker, Popup, TileLayer, useMap } from 'react-leaflet';
 import { area, pln, rooms, since } from '../format.ts';
 import { isNewSince } from '../seen.ts';
@@ -150,6 +150,49 @@ function useLabelled(offers: Offer[], keep: (number | null)[]): Set<number> {
   }, [offers, keep, map, zoom]);
 }
 
+/**
+ * How far past the edge of the window a listing still gets a pin, as a fraction of the
+ * view. A fifth either way, so a short drag uncovers pins that are already drawn instead
+ * of an empty margin waiting for the gesture to end.
+ */
+const VIEWPORT_MARGIN = 0.2;
+
+/**
+ * Only the listings on screen. Two thousand of them carry coordinates and drawing all of
+ * them at once is what makes the map heavy: every pin is a DOM node, and Leaflet compares
+ * icons by object identity, so one hover used to rebuild two thousand of them.
+ *
+ * The ones something is pointing at are kept whatever the view, because a selection can
+ * fly to a pin that is currently off screen and the flight needs a marker to open when it
+ * lands. `moveend` rather than `move`: recomputing mid-drag is the cost this avoids.
+ */
+function useVisible(offers: Offer[], keep: (number | null)[]): Offer[] {
+  const map = useMap();
+  const [bounds, setBounds] = useState<LatLngBounds>(() => map.getBounds().pad(VIEWPORT_MARGIN));
+
+  useEffect(() => {
+    const update = () => setBounds(map.getBounds().pad(VIEWPORT_MARGIN));
+
+    map.on('moveend', update);
+    map.on('resize', update);
+    update();
+
+    return () => {
+      map.off('moveend', update);
+      map.off('resize', update);
+    };
+  }, [map]);
+
+  return useMemo(
+    () =>
+      offers.filter(
+        (offer) =>
+          keep.includes(offer.id) || bounds.contains([offer.lat as number, offer.lng as number]),
+      ),
+    [offers, keep, bounds],
+  );
+}
+
 /** Leaflet measures the container on init, before the layout has given it a height. */
 function FitToContainer() {
   const map = useMap();
@@ -250,10 +293,16 @@ function FlyToSelected({
 }) {
   const map = useMap();
 
+  // Read through a ref rather than depended on: the listing set is rebuilt on every poll
+  // and on every mark, and depending on it flew the map back to the selected pin each
+  // time, throwing away wherever the reader had panned to in between.
+  const latest = useRef(located);
+  latest.current = located;
+
   useEffect(() => {
     if (selectedId === null) return;
 
-    const offer = located.find((candidate) => candidate.id === selectedId);
+    const offer = latest.current.find((candidate) => candidate.id === selectedId);
     if (offer === undefined || offer.lat === null || offer.lng === null) return;
 
     // Never zooms out. Picking a listing while reading one street should not throw the
@@ -269,7 +318,7 @@ function FlyToSelected({
       // the pin we were already leaving.
       map.off('moveend', reveal);
     };
-  }, [selectedId, located, map, markers]);
+  }, [selectedId, map, markers]);
 
   return null;
 }
@@ -277,23 +326,23 @@ function FlyToSelected({
 /**
  * The preview a pin opens. Everything except the photograph is already in hand, so the
  * request is made only once this is on screen, and only for the one listing.
+ *
+ * Being mounted is the gate. react-leaflet only portals a popup's children once the popup
+ * has been added to the map, so a closed pin never runs this; the flag that used to say so
+ * cost a render of every pin on the map each time one was opened.
  */
 function PopupBody({
   offer,
-  open,
   isNew,
   onMark,
 }: {
   offer: Offer;
-  open: boolean;
   isNew: boolean;
   onMark: (next: Mark | null) => void;
 }) {
   const [photo, setPhoto] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!open) return;
-
     const controller = new AbortController();
     fetch(`/api/offers/${offer.id}`, { signal: controller.signal })
       .then((response) => (response.ok ? (response.json() as Promise<OfferDetail>) : null))
@@ -301,7 +350,7 @@ function PopupBody({
       .catch(() => undefined);
 
     return () => controller.abort();
-  }, [offer.id, open]);
+  }, [offer.id]);
 
   return (
     <a
@@ -349,6 +398,104 @@ function PopupBody({
   );
 }
 
+/**
+ * One listing on the map, kept out of `Pins` so React can skip it.
+ *
+ * Memoised on purpose. Everything a pin draws is derived from four flags, and hovering a
+ * card in the list changes them for two pins at most; without this, react-leaflet was
+ * handed a freshly built icon for every pin on the map and rebuilt all of their markup.
+ */
+const Pin = memo(function Pin({
+  offer,
+  active,
+  selected,
+  showPrice,
+  isNew,
+  markers,
+  onHover,
+  onMark,
+  onOpenChange,
+}: {
+  offer: Offer;
+  active: boolean;
+  selected: boolean;
+  showPrice: boolean;
+  isNew: boolean;
+  markers: RefObject<Map<number, LeafletMarker>>;
+  onHover: (id: number | null) => void;
+  onMark: (id: number, next: Mark | null) => void;
+  onOpenChange: (id: number, open: boolean) => void;
+}) {
+  const position = useMemo(
+    () => [offer.lat as number, offer.lng as number] as [number, number],
+    [offer.lat, offer.lng],
+  );
+
+  const icon = useMemo(
+    () =>
+      showPrice
+        ? priceMarker(offer, active, selected, isNew)
+        : dotMarker(offer, active, selected, isNew),
+    [offer, active, selected, isNew, showPrice],
+  );
+
+  // The registry is what lets a card open this pin's popup once the flight lands. Block
+  // body on purpose: React 19 treats a returned value as the cleanup function, and
+  // Map.set returns the map.
+  const register = useCallback(
+    (instance: LeafletMarker | null) => {
+      if (instance === null) markers.current.delete(offer.id);
+      else markers.current.set(offer.id, instance);
+    },
+    [markers, offer.id],
+  );
+
+  const handlers = useMemo(
+    () => ({
+      mouseover: () => onHover(offer.id),
+      mouseout: () => onHover(null),
+      popupopen: (event: PopupEvent) => {
+        onOpenChange(offer.id, true);
+
+        // Leaflet re-runs the popup's autopan at the end of every content update, and
+        // react-leaflet updates the content on every render of this pin. Zoom out, drag
+        // away, brush a pin on the way, and the map was dragged back to the open popup.
+        // The pan that brings a popup on screen has already run by the next frame, so
+        // turning it off here keeps that and drops the rest.
+        const popup = event.popup;
+        requestAnimationFrame(() => {
+          popup.options.autoPan = false;
+        });
+      },
+      popupclose: (event: PopupEvent) => {
+        onOpenChange(offer.id, false);
+        event.popup.options.autoPan = true;
+      },
+    }),
+    [offer.id, onHover, onOpenChange],
+  );
+
+  const handleMark = useCallback((next: Mark | null) => onMark(offer.id, next), [onMark, offer.id]);
+
+  return (
+    <Marker
+      position={position}
+      ref={register}
+      icon={icon}
+      // Labels still touch at the edges; the one being pointed at comes to the front.
+      zIndexOffset={selected ? 2000 : active ? 1000 : showPrice ? 500 : 0}
+      title={`${isNew ? '[NOWE] ' : ''}${offer.title}${isExact(offer) ? '' : ' - przybliżona okolica'}`}
+      // No click handler: the pin opens its own preview and nothing else. Wiring
+      // selection here as well opened the side panel on top of the popup.
+      eventHandlers={handlers}
+    >
+      <Popup autoPan closeButton minWidth={256} maxWidth={256}>
+        <PopupBody offer={offer} isNew={isNew} onMark={handleMark} />
+      </Popup>
+    </Marker>
+  );
+});
+
 function Pins({
   located,
   activeId,
@@ -369,55 +516,32 @@ function Pins({
 }) {
   const [openId, setOpenId] = useState<number | null>(null);
   const keep = useMemo(() => [activeId, selectedId, openId], [activeId, selectedId, openId]);
-  const labelled = useLabelled(located, keep);
+
+  // Culled first, so the label collision test below runs over what is on screen rather
+  // than over every listing in Kraków.
+  const shown = useVisible(located, keep);
+  const labelled = useLabelled(shown, keep);
+
+  const onOpenChange = useCallback((id: number, open: boolean) => {
+    setOpenId((current) => (open ? id : current === id ? null : current));
+  }, []);
 
   return (
     <>
-      {located.map((offer) => {
-        const active = offer.id === activeId;
-        const selected = offer.id === selectedId;
-        const showPrice = labelled.has(offer.id);
-        const isNew = isNewSince(offer, lastSeen);
-
-        return (
-          <Marker
-            key={offer.id}
-            position={[offer.lat as number, offer.lng as number]}
-            // The registry is what lets a card open this pin's popup once the flight
-            // lands. Block body on purpose: React 19 treats a returned value as the
-            // cleanup function, and Map.set returns the map.
-            ref={(instance) => {
-              if (instance === null) markers.current.delete(offer.id);
-              else markers.current.set(offer.id, instance);
-            }}
-            icon={
-              showPrice
-                ? priceMarker(offer, active, selected, isNew)
-                : dotMarker(offer, active, selected, isNew)
-            }
-            // Labels still touch at the edges; the one being pointed at comes to the front.
-            zIndexOffset={selected ? 2000 : active ? 1000 : showPrice ? 500 : 0}
-            title={`${isNew ? '[NOWE] ' : ''}${offer.title}${isExact(offer) ? '' : ' - przybliżona okolica'}`}
-            // No click handler: the pin opens its own preview and nothing else. Wiring
-            // selection here as well opened the side panel on top of the popup.
-            eventHandlers={{
-              mouseover: () => onHover(offer.id),
-              mouseout: () => onHover(null),
-              popupopen: () => setOpenId(offer.id),
-              popupclose: () => setOpenId((current) => (current === offer.id ? null : current)),
-            }}
-          >
-            <Popup autoPan closeButton minWidth={256} maxWidth={256}>
-              <PopupBody
-                offer={offer}
-                open={openId === offer.id}
-                isNew={isNew}
-                onMark={(next) => onMark(offer.id, next)}
-              />
-            </Popup>
-          </Marker>
-        );
-      })}
+      {shown.map((offer) => (
+        <Pin
+          key={offer.id}
+          offer={offer}
+          active={offer.id === activeId}
+          selected={offer.id === selectedId}
+          showPrice={labelled.has(offer.id)}
+          isNew={isNewSince(offer, lastSeen)}
+          markers={markers}
+          onHover={onHover}
+          onMark={onMark}
+          onOpenChange={onOpenChange}
+        />
+      ))}
     </>
   );
 }
