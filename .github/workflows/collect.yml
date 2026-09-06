@@ -2,12 +2,20 @@ name: Collect
 
 on:
   schedule:
-    # Every 30 minutes. GitHub runs scheduled jobs late under load; it is a floor, not a promise.
-    - cron: '*/30 * * * *'
+    # Not the collecting interval: that is the loop in the job below, which runs a round
+    # every ten minutes and cannot be dropped once it has started. This asks the schedule
+    # for one thing only, that a run is queued by the time the loop reaches its six hour
+    # ceiling and stops, and the concurrency group holds that run pending until then. Ten
+    # minutes because GitHub drops most scheduled firings under load and one has to land
+    # somewhere inside a five and a half hour window.
+    - cron: '*/10 * * * *'
   # So a round can be started by hand from the Actions tab.
   workflow_dispatch:
 
-# A slow round must not overlap the next one and fight it over the same rows.
+# Two purposes. A slow round must not overlap the next one and fight it over the same
+# rows, and the run this queues up is the handover: GitHub keeps one pending run per group
+# and starts it the moment the running one ends, so the loop below is picked up again
+# within seconds of stopping rather than at the mercy of the next firing that survives.
 concurrency:
   group: collect
   cancel-in-progress: false
@@ -18,14 +26,10 @@ permissions:
 jobs:
   collect:
     runs-on: ubuntu-latest
-    # A round is about a hundred seconds of portals, three minutes of description
-    # reading (fifteen listings, spaced to stay inside the free tier's token rate) and
-    # then the verdicts over the whole stored set. Ten minutes used to be ample and
-    # stopped being so once the set passed eight thousand listings: every round from
-    # 2026-08-25 19:36 onwards was killed here, mid-classification, for thirteen hours.
-    # Kept well clear of the real figure rather than trimmed to it, because the cost of
-    # being wrong is another silent day of no collection.
-    timeout-minutes: 25
+    # The loop's own ceiling is five and a half hours, so this is the backstop for a round
+    # that hangs rather than the budget for the work. Six hours is where GitHub kills a job
+    # outright, and being killed there loses nothing: the queued run takes over.
+    timeout-minutes: 355
 
     steps:
       - uses: actions/checkout@v7
@@ -37,7 +41,53 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm collect
+      # A round every ten minutes, driven from inside one job rather than by the schedule,
+      # because the schedule does not deliver it. With `*/30` asked for, the rounds of
+      # 2026-09-05 actually landed at 11:19, 13:56, 16:29, 18:30, 20:50 and 22:30: gaps of
+      # two to four hours, no failures, nothing said. GitHub drops scheduled firings under
+      # load and there is no setting that changes it. A job that is already running is not
+      # dropped, so the interval moved in here, and the schedule above was left with the
+      # one job it can still do reliably enough - queueing the next run.
+      - name: Collect every ten minutes
+        run: |
+          # Just inside the six hour ceiling, with a round's worth of room to spare.
+          deadline=$(( SECONDS + 5 * 3600 + 30 * 60 ))
+          round=0
+          failures=0
+
+          while true; do
+            round=$(( round + 1 ))
+            started=$SECONDS
+
+            echo "::group::Round $round"
+            # A failed round must not end the loop: a portal refusing once is ordinary and
+            # the answer to it is the next round, ten minutes away rather than half an hour.
+            if pnpm collect; then
+              failures=0
+            else
+              failures=$(( failures + 1 ))
+              echo "Round $round failed ($failures in a row)."
+            fi
+            echo "::endgroup::"
+
+            # Three in a row is not one portal having a moment, it is something that will
+            # not fix itself in ten minutes. Ending the job here is how it gets said out
+            # loud - a red tick and the mail that comes with it - and it costs no
+            # collecting, because the run this one queued starts within seconds and comes
+            # up on a fresh runner.
+            if [ "$failures" -ge 3 ]; then
+              echo "Giving up after $failures failed rounds; the queued run takes over."
+              exit 1
+            fi
+
+            if [ "$SECONDS" -ge "$deadline" ]; then break; fi
+
+            # Measured from the start of the round, not its end, so the cadence does not
+            # drift by the length of every round. A round that overruns simply starts the
+            # next one at once.
+            remaining=$(( 600 - (SECONDS - started) ))
+            if [ "$remaining" -gt 0 ]; then sleep "$remaining"; fi
+          done
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           # Reading the total cost out of a description needs a model. Without these three
@@ -45,7 +95,8 @@ jobs:
           # round ran until now. The key is a secret; the endpoint and the model name are
           # variables, so a switch of provider is one change in the Actions tab. The pause
           # between requests defaults to twelve seconds in the collector, which is what the
-          # free tier's token rate allows, so it is not set here.
+          # free tier's token rate allows, so it is not set here. Five listings a round, so
+          # that a hundred and forty four rounds a day stay inside a free day's allowance.
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_BASE_URL: ${{ vars.LLM_BASE_URL }}
           LLM_MODEL: ${{ vars.LLM_MODEL }}

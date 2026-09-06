@@ -90,13 +90,26 @@ const RATE_LIMIT_RETRIES = 3;
 /** When the server does not say how long to wait. */
 const FALLBACK_BACKOFF_MS = 20_000;
 
-function backoffMs(response: Response): number {
+/**
+ * Past this the wait is not a queue any more, it is a spent allowance. A per minute limit
+ * is answered with seconds; a per day one with hours. Rounds now run ten minutes apart, so
+ * honouring a two hour Retry-After would hold up not this listing but every round behind
+ * it. Over the ceiling the reading gives up for the round instead, and the listings are
+ * priced by the rules alone, which is what happens when no model is configured at all.
+ */
+const MAX_BACKOFF_MS = 90_000;
+
+/** How long to wait, or null when the server is asking for longer than a round can give. */
+function backoffMs(response: Response): number | null {
   const header = response.headers.get('retry-after');
   if (header === null) return FALLBACK_BACKOFF_MS;
 
   // Seconds, per the spec. A date is legal too and not worth parsing for this.
   const seconds = Number(header);
-  return Number.isFinite(seconds) && seconds > 0 ? seconds * 1_000 : FALLBACK_BACKOFF_MS;
+  if (!Number.isFinite(seconds) || seconds <= 0) return FALLBACK_BACKOFF_MS;
+
+  const requested = seconds * 1_000;
+  return requested > MAX_BACKOFF_MS ? null : requested;
 }
 
 async function askOpenAiCompatible(
@@ -131,7 +144,14 @@ async function askOpenAiCompatible(
     // The one status worth waiting out. A free tier is a queue, not a refusal, and the
     // whole point of running this in the round is that it finishes without supervision.
     if (response.status === 429 && attempt < RATE_LIMIT_RETRIES) {
-      await new Promise((resolve) => setTimeout(resolve, backoffMs(response)));
+      const wait = backoffMs(response);
+      if (wait === null) {
+        throw new ModelError(
+          `The model API is rate limited for another ${response.headers.get('retry-after') ?? '?'} ` +
+            'second(s), which is longer than a round waits.',
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, wait));
       continue;
     }
 

@@ -15,13 +15,20 @@ type SourceName = keyof typeof COLLECTORS;
 /**
  * How many listings a round will put past the model.
  *
- * A cap rather than a target: a round brings about twenty new listings and only the ones
- * within reach of the budget are queued, so the real number is nearer seven. It exists so
- * that a round which finds a backlog - the first one after the schedule was down, say -
+ * A cap rather than a target: a round brings a handful of new listings and only the ones
+ * within reach of the budget are queued, so the real number is usually smaller. It exists
+ * so that a round which finds a backlog - the first one after the schedule was down, say -
  * cannot spend an hour on it, or spend a whole day's worth of a free tier in one go.
  * Clearing a real backlog is a job for `read:costs` against a local model.
+ *
+ * Five rather than the fifteen this was while rounds were half an hour apart. Twelve
+ * seconds separate two requests, so fifteen readings were three minutes of a six minute
+ * round, and rounds are now ten minutes apart rather than thirty: at that rate fifteen
+ * would ask the free tier for two thousand readings a day and be refused for most of it.
+ * The queue is newest first within the budget, so five still covers what a round brings
+ * in and Telegram still announces the read figure rather than the assumed one.
  */
-const PER_ROUND_READINGS = 15;
+const PER_ROUND_READINGS = 5;
 
 /**
  * Which portals this round asks for. Unset means both, which is what the cloud schedule

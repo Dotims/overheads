@@ -79,7 +79,12 @@ export async function readCosts(sql: Sql, limit = DEFAULT_LIMIT): Promise<ReadCo
         (error.message.includes('No model server') ||
           error.message.includes('answered 401') ||
           error.message.includes('answered 403') ||
-          error.message.includes('answered 404'));
+          error.message.includes('answered 404') ||
+          // The allowance is spent, for the minute or for the day. Every listing behind
+          // this one fails the same way, and a round that repeats the discovery fifteen
+          // times is a round that does not finish inside its ten minutes.
+          error.message.includes('answered 429') ||
+          error.message.includes('rate limited for another'));
       if (fatal) throw error;
 
       failed++;
