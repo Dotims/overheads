@@ -10,15 +10,19 @@ import { sleep } from '../sources/http.ts';
  * abnormal round: a change that makes hundreds of stored listings eligible at once should
  * arrive as a trickle the owner can stop, not as a night of buzzing.
  *
- * Four rather than the twelve this was while rounds were half an hour apart. The number
- * that matters is the ceiling per hour, and moving to a round every ten minutes turned
- * twelve a round from twenty four an hour into seventy two without anybody deciding that.
- * On 2026-09-06 four districts were unhidden and the notifier worked through twelve days
- * of stored listings in those districts at that rate: sixty messages between 00:42 and
- * 01:25. `notify:seed` is what should have been run alongside the widening, and this is
- * what keeps the mistake to a nuisance rather than a night of it.
+ * Two, which is the same twenty four an hour the number has meant since the incident
+ * below. The ceiling that matters is per hour rather than per round, so it is restated
+ * here every time the cadence changes: twelve a round was twenty four an hour at a round
+ * every half hour, four was twenty four at every ten minutes, and two is twenty four at
+ * every five. On 2026-09-06 four districts were unhidden and the notifier worked through
+ * twelve days of stored listings in those districts at twelve a round: sixty messages
+ * between 00:42 and 01:25. `notify:seed` is what should have been run alongside the
+ * widening, and this is what keeps that mistake to a nuisance rather than a night of it.
+ *
+ * Nothing is lost to the lower number: the queue is oldest first and what a round does
+ * not send stays queued for the next one, five minutes away.
  */
-const PER_ROUND = 4;
+const PER_ROUND = 2;
 
 /** Telegram tolerates about one message a second to the same chat. */
 const BETWEEN_MESSAGES_MS = 1_200;

@@ -3,12 +3,12 @@ name: Collect
 on:
   schedule:
     # Not the collecting interval: that is the loop in the job below, which runs a round
-    # every ten minutes and cannot be dropped once it has started. This asks the schedule
+    # every five minutes and cannot be dropped once it has started. This asks the schedule
     # for one thing only, that a run is queued by the time the loop reaches its six hour
-    # ceiling and stops, and the concurrency group holds that run pending until then. Ten
+    # ceiling and stops, and the concurrency group holds that run pending until then. Five
     # minutes because GitHub drops most scheduled firings under load and one has to land
     # somewhere inside a five and a half hour window.
-    - cron: '*/10 * * * *'
+    - cron: '*/5 * * * *'
   # So a round can be started by hand from the Actions tab.
   workflow_dispatch:
 
@@ -41,14 +41,14 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # A round every ten minutes, driven from inside one job rather than by the schedule,
+      # A round every five minutes, driven from inside one job rather than by the schedule,
       # because the schedule does not deliver it. With `*/30` asked for, the rounds of
       # 2026-09-05 actually landed at 11:19, 13:56, 16:29, 18:30, 20:50 and 22:30: gaps of
       # two to four hours, no failures, nothing said. GitHub drops scheduled firings under
       # load and there is no setting that changes it. A job that is already running is not
       # dropped, so the interval moved in here, and the schedule above was left with the
       # one job it can still do reliably enough - queueing the next run.
-      - name: Collect every ten minutes
+      - name: Collect every five minutes
         run: |
           # Just inside the six hour ceiling, with a round's worth of room to spare.
           deadline=$(( SECONDS + 5 * 3600 + 30 * 60 ))
@@ -61,7 +61,7 @@ jobs:
 
             echo "::group::Round $round"
             # A failed round must not end the loop: a portal refusing once is ordinary and
-            # the answer to it is the next round, ten minutes away rather than half an hour.
+            # the answer to it is the next round, five minutes away rather than half an hour.
             if pnpm collect; then
               failures=0
             else
@@ -71,7 +71,7 @@ jobs:
             echo "::endgroup::"
 
             # Three in a row is not one portal having a moment, it is something that will
-            # not fix itself in ten minutes. Ending the job here is how it gets said out
+            # not fix itself in five minutes. Ending the job here is how it gets said out
             # loud - a red tick and the mail that comes with it - and it costs no
             # collecting, because the run this one queued starts within seconds and comes
             # up on a fresh runner.
@@ -85,7 +85,7 @@ jobs:
             # Measured from the start of the round, not its end, so the cadence does not
             # drift by the length of every round. A round that overruns simply starts the
             # next one at once.
-            remaining=$(( 600 - (SECONDS - started) ))
+            remaining=$(( 300 - (SECONDS - started) ))
             if [ "$remaining" -gt 0 ]; then sleep "$remaining"; fi
           done
         env:
@@ -95,8 +95,10 @@ jobs:
           # round ran until now. The key is a secret; the endpoint and the model name are
           # variables, so a switch of provider is one change in the Actions tab. The pause
           # between requests defaults to twelve seconds in the collector, which is what the
-          # free tier's token rate allows, so it is not set here. Five listings a round, so
-          # that a hundred and forty four rounds a day stay inside a free day's allowance.
+          # free tier's token rate allows, so it is not set here. Three listings a round, so
+          # that two hundred and eighty eight rounds a day stay inside a free day's
+          # allowance, and a day that runs out anyway only costs the readings: the round
+          # logs it and prices the listing by the rules instead.
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_BASE_URL: ${{ vars.LLM_BASE_URL }}
           LLM_MODEL: ${{ vars.LLM_MODEL }}

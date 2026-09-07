@@ -21,14 +21,19 @@ type SourceName = keyof typeof COLLECTORS;
  * cannot spend an hour on it, or spend a whole day's worth of a free tier in one go.
  * Clearing a real backlog is a job for `read:costs` against a local model.
  *
- * Five rather than the fifteen this was while rounds were half an hour apart. Twelve
- * seconds separate two requests, so fifteen readings were three minutes of a six minute
- * round, and rounds are now ten minutes apart rather than thirty: at that rate fifteen
- * would ask the free tier for two thousand readings a day and be refused for most of it.
- * The queue is newest first within the budget, so five still covers what a round brings
+ * Three, because the number that matters is readings a day rather than readings a round.
+ * Rounds are five minutes apart, which is two hundred and eighty eight a day, and three
+ * apiece keeps the total under nine hundred - inside what the free tier gives - where
+ * five would ask for fourteen hundred and be refused from the afternoon on. Twelve
+ * seconds separate two requests, so three is also half a minute of a five minute round.
+ * The queue is newest first within the budget, so three still covers what a round brings
  * in and Telegram still announces the read figure rather than the assumed one.
+ *
+ * Running out is survivable either way. A spent allowance answers 429, readCosts treats
+ * that as fatal and stops, and collectAll below logs it and carries on: the listing is
+ * priced by the rules in classify.ts, which is what this project did before any model.
  */
-const PER_ROUND_READINGS = 5;
+const PER_ROUND_READINGS = 3;
 
 /**
  * Which portals this round asks for. Unset means both, which is what the cloud schedule
