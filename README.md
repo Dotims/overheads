@@ -1,172 +1,249 @@
+<div align="center">
+
+<img src="apps/web/public/favicon.svg" width="76" alt="Overheads logo: a roof over a head" />
+
 # Overheads
 
-Watches new rental listings in Kraków on OLX, Otodom and Gratka, drops the ones outside the
-target area, works out the real monthly cost (rent + building fee + utilities mentioned
-in the description) and pings Telegram when something lands in budget.
+**Watches new rental listings in Kraków on OLX, Otodom and Gratka, works out what each flat really costs a month, and pings Telegram when one lands in budget.**
 
-It exists because checking the same listings several times a day is a waste of time,
-and the good ones in Kraków are gone within hours.
+[![CI](https://github.com/Dotims/overheads/actions/workflows/ci.yml/badge.svg)](https://github.com/Dotims/overheads/actions/workflows/ci.yml)
+![Node 26](https://img.shields.io/badge/Node-26-5fa04e?logo=nodedotjs&logoColor=white)
+![TypeScript strict](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)
+![React 19](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=black)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169e1?logo=postgresql&logoColor=white)
+[![License: MIT](https://img.shields.io/badge/License-MIT-ffb224.svg)](LICENSE)
 
-## Where it runs
+<img src="docs/media/demo.gif" width="880" alt="The Overheads dashboard: hovering a listing lights its pin, picking one flies the map to the flat, raising the budget and unhiding two districts fills the map in, sorting by price, then switching to the light theme" />
 
-Both portals are collected by GitHub Actions every fifteen minutes, writing to Neon.
-Nothing here needs a computer to be awake.
+</div>
 
-OLX refused datacenter addresses for a week and the round asked for Otodom alone while a
-local timer collected OLX from an ordinary connection. Measured again on 2026-08-16 it
-answers 200 from the cloud, four times over two minutes, to the same User-Agent we have
-always sent; what it still refuses from there is curl, over either protocol version. So
-the refusal is about the shape of the client rather than about us, and it can return
-without notice. The local timer (`deploy/`) and the phone (`docs/olx-from-a-phone.md`)
-stay as standbys, and a refused round fails loudly rather than collecting nothing
-quietly. `OVERHEADS_SOURCES` picks the portals for a round.
+---
 
-Both portals are read over HTTP/2. OLX stopped answering HTTP/1.1 on 2026-08-15, from
-every address, and Node's `fetch` speaks nothing else.
+Good flats in Kraków are gone within hours, and the advertised price is rarely what you
+pay. The building fee is a separate field many advertisers leave empty, and utilities
+hide in the description: `prad oraz gaz wedlug zuzycia (ok 250zl miesiecznie)`.
 
-## Status
+Overheads checks three portals every five minutes, prices every listing the way a
+tenant would, and sends a message only when the full monthly cost fits. Everything
+it has collected is on a map, filtered in the browser. The interface is in Polish, because
+it was built for an actual flat hunt in Kraków.
 
-Running. Both portals are collected, classified and deduplicated, the dashboard is
-deployed, and listings that land in budget are announced on Telegram. The bot is
-configured through `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`; with either unset a
-collection round finishes quietly, which is how the cloud schedule runs.
+## What it does
 
-`notify:seed` is run once, when a bot is first connected: it records everything currently
-in budget as already announced, so switching notifications on does not replay a week of
-collecting into a phone.
+- **Collects** new listings from OLX, Otodom and Gratka every five minutes, from a GitHub
+  Actions job, so no machine has to stay on.
+- **Prices** each one as rent + building fee + utilities, and says how sure it is: read
+  from the listing, all-inclusive, or assumed, with the reasons in plain words.
+- **Reads costs out of prose** with a small language model when the description is the
+  only place they appear. Optional, and it only extracts figures; every judgement is made
+  by tested rules.
+- **Recognises the same flat** advertised on two portals and shows it once, with a link to
+  the other advert.
+- **Notifies on Telegram** when a listing fits the budget, under the same bounds the
+  dashboard filters on, at most two messages a round so a widened filter cannot flood the
+  chat.
+- **Maps everything** in a React dashboard: price pins, filters by cost, floor area, rooms
+  and district, favourites and rejects, a "new since your last visit" badge, dark and light
+  themes.
 
-## Tiers
-
-A listing is judged on two numbers. `worth` means the advertised rent alone is at or
-below 2200 PLN. `top` means the full monthly cost, rent plus building fee plus utilities,
-is at or below 2600 PLN. Districts outside the target area are rejected first, whatever
-they cost.
-
-The building fee and utilities are the awkward part. Portals report the fee as a number
-when the advertiser bothers to fill it in, and describe utilities in prose when they
-mention them at all. A listing that gives no fee is judged on an assumed 400 PLN, which
-is roughly what a Kraków flat costs to run, unless the description says the price covers
-everything or that there is no fee. Every verdict carries a `cost_certainty` saying
-whether its total was read or assumed, and a list of reasons in plain words.
-
-Prose is where the patterns run out. Two descriptions in three that mention utilities
-state the amount in a form no regular expression reaches: `prad oraz gaz wedlug zuzycia
-(ok 250zl miesiecznie)`, `oplata za wode i smieci - przy 2 osobach 200zl`. `read:costs`
-puts those through a small language model running locally and stores what it read in
-`cost_readings`, which the rules then consult for whatever the portal left blank. The
-model only extracts; every judgement stays in `domain/classify.ts` where it can be
-tested without a model running. It is optional: with no model configured, listings are
-priced by the rules alone exactly as before.
-
-Costs are also reported per person, the total split by room count, because that is the
-figure two flats of different sizes can actually be compared on.
+<img src="docs/media/dashboard-light.png" alt="The dashboard in the light theme: listings priced in full on the left, price pins across Kraków on the right" />
 
 ## How it works
 
-All three portals serve structured JSON, so there is no HTML parsing and no headless
-browser.
+```mermaid
+flowchart LR
+  subgraph Portals
+    OLX["OLX<br/>public JSON API"]
+    OTO["Otodom<br/>Next.js data route"]
+    GRA["Gratka<br/>__NUXT_DATA__"]
+  end
+
+  subgraph Round["One round, every 5 min in GitHub Actions"]
+    direction TB
+    C["collect<br/>parse to NormalizedOffer"] --> L["read costs<br/>optional language model"]
+    L --> K["classify<br/>rules, versioned"] --> D["dedupe"] --> N["notify"]
+  end
+
+  OLX & OTO & GRA --> C
+  C <--> DB[("PostgreSQL<br/>offers, classifications,<br/>cost_readings, runs")]
+  N --> TG["Telegram"]
+  DB --> API["GET /api/offers<br/>Vercel function, CDN cached"] --> WEB["React dashboard<br/>Leaflet map, filters, marks"]
+```
+
+A round fetches two pages of the newest listings per portal, stores them, prices what
+changed, folds duplicates together and announces whatever newly fits. Each step is its own
+command, so any of them can be rerun alone: changing the rules means reclassifying what is
+stored, never refetching it.
+
+## Engineering notes
+
+### JSON in, never HTML
+
+All three portals serve structured data, so there is no HTML parsing and no headless
+browser:
 
 | Portal | Data source                     | What it gives                                                   |
 | ------ | ------------------------------- | --------------------------------------------------------------- |
 | OLX    | `/api/v1/offers/` (public API)  | price, building fee, district, description, blurred coordinates |
 | Otodom | `/_next/data/<buildId>/...json` | price, building fee, street, district, advertiser type          |
-| Otodom | listing page                    | exact coordinates (`radius: 0`), full description               |
+| Otodom | listing page                    | exact coordinates, full description                             |
 | Gratka | `__NUXT_DATA__` in the page     | price, street, description, photographs, agency or owner        |
 
-Otodom publishes no API. What it does publish is the data endpoint Next.js serves its
-own pages from, which is the same payload without the HTML. The `buildId` in that path
-changes on every deploy of theirs, so it is scraped from the search page and refreshed
-when a request comes back 404.
+Otodom publishes no API, but it does publish the data route Next.js renders its own pages
+from. The `buildId` in that path changes with every deploy of theirs, so it is read from
+the search page and refreshed when a request comes back 404. Listing pages cost a request
+each, so they are fetched only for listings that could still reach a tier.
 
-Otodom search results carry no description and no coordinates, and both cost a request
-per listing. They are fetched only for listings that could still reach a tier, which on
-a normal run is a handful out of seventy.
+The client says who it is (`User-Agent: Overheads/0.1 (+repo)`), asks for one thing at a
+time with a pause between pages, and keeps the recurring poll shallow. Going deeper is a
+backfill run by hand. When OLX started refusing datacenter addresses the answer was a
+standby collector on an ordinary connection, not a disguise.
 
-Gratka ships its search results inside the page, as JSON, in the `__NUXT_DATA__` script
-tag. `_payload.json` looks like the endpoint to ask instead and is a cached prerender of
-page one that ignores `?page=` and `?sort=`. It gives no building fee, so every Gratka
-listing meets the 400 PLN assumption, and no coordinates at all, so these have no pin;
-the district is read from the advert's own URL, which carries it for four in five.
-Measured before it was added: of 105 listings, half were already here from the other two
-portals and the rest brought about five flats a day in budget that nothing else showed.
+### Facts and verdicts live apart
 
-## Stack
+`offers` holds what the portal said, including the full payload in `raw`, so a parsing
+change can be replayed over stored data. Overheads' own judgement lives in
+`classifications`, stamped with a `rules_version`: when the thresholds move, everything is
+reclassified locally in seconds.
 
-Node 26 + TypeScript with no build step (Node runs `.ts` natively). Storage is Postgres
-on Neon, reached through `postgres`, which is pure JavaScript: the project has no native
-dependencies.
+Three dates are kept separate on purpose: when the portal says the advert was created,
+when it was last bumped, and when Overheads first saw it. A month-old listing bumped
+today is not a new flat. Coordinates carry their precision too: Otodom pins an address,
+OLX only an area, so an approximate pin carries a `~` before its price rather than
+putting a flat on a street it is not on.
 
-## Running it
+### What a flat really costs
+
+A listing is judged on two numbers: `worth` when the rent alone is at most 2200 PLN, `top`
+when rent, building fee and utilities together are at most 2600 PLN. A missing building
+fee is assumed to be 400 PLN, unless the description says the price covers everything,
+and the verdict says so instead of pretending to know. A real verdict from the API:
+
+```json
+{
+  "source": "otodom",
+  "title": "Dużu pokój do wynajęcia ul. Skrajna - wspólna kuchnia i łazienka",
+  "pricePln": 1100,
+  "rentPln": 137,
+  "totalCostPln": 1637,
+  "tier": "top",
+  "costCertainty": "exact",
+  "reasons": [
+    "The building fee is stated as 137 PLN.",
+    "The description states utilities of 400 PLN.",
+    "Total 1637 PLN is within the 2600 PLN limit."
+  ]
+}
+```
+
+Prose is where regular expressions run out: two descriptions in three that mention
+utilities state the amount in a form none of them reaches. `read:costs` puts those through
+a small model and stores what it read in `cost_readings`, which the rules consult for
+whatever the portal left blank. The model only extracts. On listings checked by hand, the
+local `qwen3:4b` beat `qwen2.5:7b` on both accuracy and speed and fits a 6 GB card; a
+hosted OpenAI-compatible endpoint serves the unattended round.
+
+### The same flat, twice
+
+Rent, area and room count agreeing is not enough: across 3968 live listings that left 2744
+candidate pairs. Trigram similarity on titles and descriptions splits them cleanly, so
+text decides and a shared advertiser only lowers the bar for text that already half
+agrees. Nothing is deleted: `duplicate_of` names the advert worth showing, and the
+thresholds are recomputed from scratch on every run, so changing one needs no migration.
+
+### Running unattended
+
+GitHub drops scheduled workflow runs under load (asked for every 30 minutes, it delivered
+gaps of two to four hours), so the five-minute cadence is a loop inside one long job and
+the cron only queues the next job to take over. The database is a free Postgres tier, and
+transfer is what runs out first, so `/api/offers` is cached at the CDN, sends only
+listings within reach of the budget, and the page stops polling while its tab is hidden.
+
+## Tech stack
+
+| Area      | Choice                                                                                   |
+| --------- | ---------------------------------------------------------------------------------------- |
+| Collector | Node 26 running TypeScript natively (no build step), `postgres` client, `node:test`      |
+| Storage   | PostgreSQL, migrations in plain SQL, rows read through checked mappers instead of casts  |
+| Dashboard | React 19, Vite, Tailwind CSS 4, Radix Colors, Leaflet via react-leaflet                  |
+| Hosting   | GitHub Actions for collection, Vercel functions for the API, Telegram Bot API for alerts |
+| Quality   | TypeScript strict, ESLint, Prettier, 153 tests (7 against a real Postgres in CI)         |
+
+The collector has no native dependencies: Node runs its TypeScript directly and the
+database client is pure JavaScript.
+
+## Running it locally
+
+You need Node 26, pnpm and a Postgres. Docker gives you the last one in a line:
 
 ```bash
+docker run -d --name overheads-pg -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:17
+
 pnpm install
-cp .env.example .env                            # then put your Postgres connection string in it
-pnpm --filter @overheads/collector migrate      # creates the schema
-pnpm --filter @overheads/collector collect:olx     # fetches and stores OLX listings
-pnpm --filter @overheads/collector collect:otodom # same for Otodom
-pnpm --filter @overheads/collector collect:gratka # same for Gratka
-pnpm --filter @overheads/collector classify     # judges what is stored, no network
-pnpm --filter @overheads/collector status       # prints what is in the database
+cp .env.example .env    # set DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres
+pnpm collect            # migrates, then one round of OLX and Otodom: fetch, price, dedupe
 ```
-
-Reading costs out of descriptions needs a model. There are two ways to provide one and
-the project does not care which:
-
-A **hosted** one runs inside the collection round, so a listing is priced before it is
-announced rather than corrected an hour later. Any OpenAI-compatible endpoint will do;
-[Groq](https://console.groq.com) issues free keys without a card. Set `LLM_API_KEY`,
-`LLM_BASE_URL` and `LLM_MODEL`, and the round reads up to fifteen new listings a time,
-twelve seconds apart, because free tiers cap tokens per minute long before requests.
-
-A **local** one is for backfills, where a hosted free tier would run out on the first
-thousand. Install [Ollama](https://ollama.com), set `OLLAMA_MODEL`, and run it by hand:
-
-```bash
-ollama serve &
-ollama pull qwen3:4b
-pnpm --filter @overheads/collector read:costs 50     # roughly two minutes
-pnpm --filter @overheads/collector read:costs 2000   # or the whole backlog
-```
-
-Two to four seconds a listing on a 6 GB card, and it reclassifies when it is done. The
-queue is ordered by whether the reading could still change the verdict, so listings within
-reach of the budget are read first and the rest are behind them rather than dropped.
-
-Nothing else depends on any of this. With no model configured at all, listings are priced
-by the rules alone and every other command works exactly as it did.
 
 The dashboard needs two terminals: the API reads the database, the dev server serves the
 page and proxies `/api` to it.
 
 ```bash
-pnpm --filter @overheads/collector serve   # http://127.0.0.1:4317
-pnpm --filter @overheads/web dev           # http://localhost:4318
+pnpm serve                        # API on http://127.0.0.1:4317
+pnpm --filter @overheads/web dev  # dashboard on http://localhost:4318
 ```
 
-Filters live in the browser: full monthly cost, minimum floor area, tier, district and
-private advertisers only. The whole set is a few hundred rows, so it is sent once and
-filtered in memory rather than queried per keystroke.
-
-Quality gate before committing:
+With no Telegram bot configured a round finishes quietly, and with no model configured
+listings are priced by the rules alone. To read costs with a local model:
 
 ```bash
-pnpm check   # prettier + eslint + tsc + tests
+ollama serve &
+ollama pull qwen3:4b
+pnpm --filter @overheads/collector read:costs 50   # reads, then reclassifies
 ```
+
+Before committing:
+
+```bash
+pnpm check   # prettier, eslint, tsc and the tests that need no database
+
+# the database tests empty their tables, so give them a database of their own
+docker exec overheads-pg createdb -U postgres overheads_test
+TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/overheads_test pnpm test
+```
+
+<details>
+<summary><b>Configuration</b></summary>
+
+Everything is read from `.env` locally and from the environment in CI and on Vercel.
+`.env.example` documents each variable in full.
+
+| Variable                                   | Purpose                                                                                               |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                             | Postgres connection string. The only one that is required.                                            |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`   | The bot and the chat it writes to. Both or neither.                                                   |
+| `NOTIFY_*`                                 | Bounds on what is worth a message: cost, floor area, rooms, districts.                                |
+| `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL` | A hosted OpenAI-compatible model for reading costs inside the round.                                  |
+| `OLLAMA_MODEL`                             | A local model for backfills, through Ollama.                                                          |
+| `OVERHEADS_SOURCES`                        | Portals a round asks, comma separated. OLX and Otodom when unset; the scheduled round asks all three. |
+| `INGEST_TOKEN`                             | Guards the endpoint a standby collector posts OLX responses to.                                       |
+
+</details>
 
 ## Layout
 
 ```
-server/               serverless functions for the deployed dashboard, bundled by
-                      scripts/build-vercel.mjs into .vercel/output
 apps/collector/       fetching, normalising, classifying, serving the API
   src/sources/        one folder per portal, each producing a NormalizedOffer
-  src/domain/         the rules: districts, costs, tiers. No database, no network.
+  src/domain/         the rules: costs, tiers, duplicates. No database, no network.
   src/db/             schema, migrations and checked row readers
   src/commands/       one exported function per job, side effects only when called
   src/cli.ts          the only entry point: `node src/cli.ts <command>`
 apps/web/             the dashboard
+server/               the API as Vercel functions, bundled by scripts/build-vercel.mjs
+.github/workflows/    CI, and the collection round
+deploy/               systemd units for a standby collector on an ordinary connection
 ```
 
 ## License
 
-MIT
+[MIT](LICENSE)
