@@ -51,23 +51,23 @@ it was built for an actual flat hunt in Kraków.
 ## How it works
 
 ```mermaid
-flowchart LR
+flowchart TB
   subgraph Portals
+    direction LR
     OLX["OLX<br/>public JSON API"]
     OTO["Otodom<br/>Next.js data route"]
     GRA["Gratka<br/>__NUXT_DATA__"]
   end
 
-  subgraph Round["One round, every 5 min in GitHub Actions"]
-    direction TB
-    C["collect<br/>parse to NormalizedOffer"] --> L["read costs<br/>optional language model"]
-    L --> K["classify<br/>rules, versioned"] --> D["dedupe"] --> N["notify"]
+  subgraph Round["One round, every 5 minutes, in GitHub Actions"]
+    direction LR
+    C["collect"] --> L["read costs<br/>optional model"] --> K["classify"] --> D["dedupe"] --> N["notify"]
   end
 
-  OLX & OTO & GRA --> C
-  C <--> DB[("PostgreSQL<br/>offers, classifications,<br/>cost_readings, runs")]
+  Portals --> C
+  Round <--> DB[("PostgreSQL")]
   N --> TG["Telegram"]
-  DB --> API["GET /api/offers<br/>Vercel function, CDN cached"] --> WEB["React dashboard<br/>Leaflet map, filters, marks"]
+  DB --> API["GET /api/offers<br/>Vercel function, CDN cached"] --> WEB["React dashboard"]
 ```
 
 A round fetches two pages of the newest listings per portal, stores them, prices what
