@@ -127,8 +127,8 @@ describe(
       assert.equal(row?.description, 'Pełny opis.');
       assert.equal(Number(row?.lat), 50.05);
       assert.equal(Number(row?.price_pln), 1900);
-      // jsonb arrives as text from this driver, so compare the parsed payload.
-      assert.deepEqual(JSON.parse(String(row?.raw)), { ad: { images: ['a.jpg'] } });
+      // Stored through sql.json, so the driver hands the payload back already parsed.
+      assert.deepEqual(row?.raw, { ad: { images: ['a.jpg'] } });
     });
 
     test('two rounds storing the same new listing at once do not collide', async () => {
