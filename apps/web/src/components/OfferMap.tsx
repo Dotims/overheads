@@ -9,10 +9,13 @@ import { MarkControls } from './MarkControls.tsx';
 
 const KRAKOW: [number, number] = [50.0614, 19.9372];
 
+// Esri's grey canvas: needs no key, and is cached down to level 16; Leaflet scales it past that.
 const TILES: Record<Theme, string> = {
-  dark: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-  light: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+  dark: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+  light:
+    'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
 };
+const TILES_NATIVE_MAX_ZOOM = 16;
 
 /** Otodom pins a real address; OLX reports an area centre and the marker says so. */
 function isExact(offer: Offer): boolean {
@@ -602,7 +605,8 @@ export function OfferMap({
         <TileLayer
           key={theme}
           url={TILES[theme]}
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+          attribution='&copy; <a href="https://www.esri.com">Esri</a>, HERE, Garmin, &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          maxNativeZoom={TILES_NATIVE_MAX_ZOOM}
           maxZoom={20}
         />
         <FitToContainer />

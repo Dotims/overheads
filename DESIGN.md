@@ -79,8 +79,9 @@ disabled under `prefers-reduced-motion`.
 
 ## Map
 
-Dark tiles from CARTO rather than light OSM tiles pushed through a CSS invert; the
-filtered version left rows of tiles unpainted and looked like a rendering fault.
+Esri's dark and light grey canvas tiles rather than light OSM tiles pushed through a CSS
+invert; the filtered version left rows of tiles unpainted and looked like a rendering
+fault. They need no key, which is why they replaced CARTO's, which do now.
 Otodom pins a real address and draws a filled point, glowing when the listing fits the
 budget. OLX reports the centre of an area and draws a hollow circle instead. The
 distinction is deliberate: presenting a blurred area as an address would put flats on
