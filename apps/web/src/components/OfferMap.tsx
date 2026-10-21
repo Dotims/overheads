@@ -4,7 +4,7 @@ import { MapContainer, Marker, Popup, TileLayer, useMap } from 'react-leaflet';
 import { area, pln, rooms, since } from '../format.ts';
 import { isNewSince } from '../seen.ts';
 import type { Theme } from '../theme.ts';
-import type { Mark, Offer, OfferDetail } from '../types.ts';
+import type { Mark, Offer } from '../types.ts';
 import { MarkControls } from './MarkControls.tsx';
 
 const KRAKOW: [number, number] = [50.0614, 19.9372];
@@ -327,12 +327,9 @@ function FlyToSelected({
 }
 
 /**
- * The preview a pin opens. Everything except the photograph is already in hand, so the
- * request is made only once this is on screen, and only for the one listing.
- *
- * Being mounted is the gate. react-leaflet only portals a popup's children once the popup
- * has been added to the map, so a closed pin never runs this; the flag that used to say so
- * cost a render of every pin on the map each time one was opened.
+ * The preview a pin opens. The list already carries the first photograph, so the popup
+ * has its full height the moment it opens and Leaflet's autopan brings all of it on
+ * screen; a photograph fetched afterwards grew the popup past the top of the map.
  */
 function PopupBody({
   offer,
@@ -343,18 +340,6 @@ function PopupBody({
   isNew: boolean;
   onMark: (next: Mark | null) => void;
 }) {
-  const [photo, setPhoto] = useState<string | null>(null);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    fetch(`/api/offers/${offer.id}`, { signal: controller.signal })
-      .then((response) => (response.ok ? (response.json() as Promise<OfferDetail>) : null))
-      .then((detail) => setPhoto(detail?.photos[0] ?? null))
-      .catch(() => undefined);
-
-    return () => controller.abort();
-  }, [offer.id]);
-
   return (
     <a
       href={offer.url}
@@ -362,9 +347,9 @@ function PopupBody({
       rel="noreferrer noopener"
       className="block w-64 no-underline"
     >
-      {photo !== null && (
+      {offer.photo !== null && (
         <img
-          src={photo}
+          src={offer.photo}
           alt=""
           className="mb-2.5 aspect-[4/3] w-full rounded-lg bg-graphite-900 object-cover"
         />
@@ -463,12 +448,20 @@ const Pin = memo(function Pin({
         // Leaflet re-runs the popup's autopan at the end of every content update, and
         // react-leaflet updates the content on every render of this pin. Zoom out, drag
         // away, brush a pin on the way, and the map was dragged back to the open popup.
-        // The pan that brings a popup on screen has already run by the next frame, so
-        // turning it off here keeps that and drops the rest.
+        // Only the pan that brings the popup on screen is wanted, and it is the one run
+        // once react-leaflet has drawn the content in, which can land after the next
+        // frame. So the switch waits until the content is there, then one frame more.
         const popup = event.popup;
-        requestAnimationFrame(() => {
-          popup.options.autoPan = false;
-        });
+        const settle = () => {
+          if (popup.getElement()?.querySelector('.leaflet-popup-content')?.hasChildNodes()) {
+            requestAnimationFrame(() => {
+              popup.options.autoPan = false;
+            });
+          } else if (popup.isOpen()) {
+            requestAnimationFrame(settle);
+          }
+        };
+        requestAnimationFrame(settle);
       },
       popupclose: (event: PopupEvent) => {
         onOpenChange(offer.id, false);
